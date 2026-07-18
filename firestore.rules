@@ -1,0 +1,49 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "hening300@gmail.com"
+      );
+    }
+
+    // 允许用户访问自己的数据，同时允许管理员管理所有用户数据
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+
+      match /contracts/{contractId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        
+        match /payments/{paymentId} {
+          allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        }
+      }
+    }
+
+    match /users_metadata/{userId} {
+      allow create, update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+
+    match /support_tickets/{ticketId} {
+      allow create: if isSignedIn();
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow get: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if isSignedIn();
+      allow list, get: if isAdmin();
+    }
+  }
+}
