@@ -236,13 +236,20 @@ export default function ContractFlowApp() {
     if (!data.length) return;
     
     try {
-      const ExcelJSImport = await import('exceljs');
-      const ExcelJS = (ExcelJSImport as any).default || ExcelJSImport;
-      const FileSaver = await import('file-saver');
-      const fileSaverObj = (FileSaver as any).default || FileSaver;
-      const saveAs = typeof fileSaverObj === 'function' ? fileSaverObj : (fileSaverObj.saveAs || fileSaverObj.default?.saveAs);
-      
-      if (typeof saveAs !== 'function') throw new Error("Could not find saveAs function");
+      // Dynamic CDN script loading for ExcelJS to avoid client bundling chunk load issues in Next.js
+      let ExcelJS = (window as any).ExcelJS;
+      if (!ExcelJS) {
+        ExcelJS = await new Promise((resolve, reject) => {
+          if (typeof window === 'undefined') return reject(new Error('Window is undefined'));
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+          script.onload = () => resolve((window as any).ExcelJS);
+          script.onerror = (e) => reject(new Error('Failed to load exceljs from CDN'));
+          document.body.appendChild(script);
+        });
+      }
+
+      if (!ExcelJS) throw new Error("Could not load ExcelJS library from CDN");
 
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('合同财务明细');
@@ -375,7 +382,16 @@ export default function ContractFlowApp() {
       ];
 
       const buffer = await workbook.xlsx.writeBuffer();
-      saveAs(new Blob([buffer]), `${filename}.xlsx`);
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
       toast({ title: "报表导出成功", description: `已下载 ${data.length} 条记录` });
     } catch (error: any) {
       console.error(error);
@@ -478,6 +494,7 @@ export default function ContractFlowApp() {
       };
       reader.readAsBinaryString(file);
     } catch (error) {
+      console.error("Excel import failed:", error);
       toast({ variant: "destructive", title: "导入错误" });
     } finally {
       setIsImporting(false);

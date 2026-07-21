@@ -13,7 +13,7 @@ export function getSdks(firebaseApp: FirebaseApp) {
   return {
     firebaseApp,
     auth: getAuth(firebaseApp),
-    firestore: getFirestore(firebaseApp)
+    firestore: getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId || '(default)')
   };
 }
 

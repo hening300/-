@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LayoutDashboard, Lock, Mail, UserPlus, LogIn, KeyRound } from "lucide-react";
+import { LayoutDashboard, Mail, UserPlus, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export function AuthScreen() {
@@ -18,24 +18,65 @@ export function AuthScreen() {
   const db = useFirestore();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim()) return;
     setIsLoading(true);
+    
+    const finalEmail = email.includes("@") ? email.trim() : `${email.trim()}@system.local`;
+    const defaultPassword = "SystemDefaultPassword123!";
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, finalEmail, defaultPassword);
       toast({
         title: "登录成功",
         description: "正在进入您的合同管理空间",
       });
     } catch (error: any) {
+      console.error("Login failed:", error);
+      // 如果账号不存在，则直接尝试自动注册并登录
+      if (
+        error.code === "auth/user-not-found" || 
+        error.code === "auth/invalid-credential" || 
+        error.code === "auth/wrong-password"
+      ) {
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, finalEmail, defaultPassword);
+          const user = userCredential.user;
+
+          // 注册后直接设置永久授权
+          const creationTimeStr = user.metadata.creationTime || new Date().toISOString();
+          const creationTimeMs = new Date(creationTimeStr).getTime();
+          const ninetyNineYearsMs = 99 * 365 * 24 * 60 * 60 * 1000;
+          
+          await setDoc(doc(db, "users_metadata", user.uid), {
+            uid: user.uid,
+            email: user.email,
+            registeredAt: creationTimeStr,
+            expiresAt: creationTimeMs + ninetyNineYearsMs
+          });
+          
+          toast({
+            title: "账号自动创建并登录成功",
+            description: "正在进入您的合同管理空间",
+          });
+          return;
+        } catch (regError: any) {
+          console.error("Auto registration failed:", regError);
+          toast({
+            variant: "destructive",
+            title: "登录失败",
+            description: regError.message || "无法自动创建账号，请重试",
+          });
+          return;
+        }
+      }
       toast({
         variant: "destructive",
         title: "登录失败",
-        description: "请检查账号密码是否正确",
+        description: "请检查账号是否正确",
       });
     } finally {
       setIsLoading(false);
@@ -44,10 +85,14 @@ export function AuthScreen() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim()) return;
     
     setIsLoading(true);
+    const finalEmail = email.includes("@") ? email.trim() : `${email.trim()}@system.local`;
+    const defaultPassword = "SystemDefaultPassword123!";
+
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, finalEmail, defaultPassword);
       const user = userCredential.user;
 
       // 注册后直接设置永久授权
@@ -67,10 +112,13 @@ export function AuthScreen() {
         description: "您的专属空间已就绪",
       });
     } catch (error: any) {
+      console.error("Registration failed:", error);
       toast({
         variant: "destructive",
         title: "注册失败",
-        description: error.message || "无法创建账号，请重试",
+        description: error.code === "auth/email-already-in-use" 
+          ? "该账号已存在，请直接登录" 
+          : (error.message || "无法创建账号，请重试"),
       });
     } finally {
       setIsLoading(false);
@@ -110,19 +158,19 @@ export function AuthScreen() {
                   欢迎回来
                 </CardTitle>
                 <CardDescription>
-                  请输入您的账号密码进入管理系统
+                  输入您的账号或邮箱即可一键进入系统，未注册的账号将自动创建。
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleLogin}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">邮箱地址</Label>
+                    <Label htmlFor="email">账号 / 邮箱地址</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input 
                         id="email" 
-                        type="email" 
-                        placeholder="name@example.com" 
+                        type="text" 
+                        placeholder="请输入您的账号(如: admin) 或邮箱" 
                         className="pl-10 h-11"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -130,25 +178,10 @@ export function AuthScreen() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">密码</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        id="password" 
-                        type="password" 
-                        placeholder="••••••••" 
-                        className="pl-10 h-11"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required 
-                      />
-                    </div>
-                  </div>
                 </CardContent>
                 <CardFooter>
                   <Button type="submit" className="w-full h-11 font-black text-lg" disabled={isLoading}>
-                    {isLoading ? "正在验证..." : "立即登录"}
+                    {isLoading ? "正在验证..." : "立即登录 / 注册"}
                   </Button>
                 </CardFooter>
               </form>
@@ -169,31 +202,16 @@ export function AuthScreen() {
               <form onSubmit={handleRegister}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="reg-email">邮箱地址</Label>
+                    <Label htmlFor="reg-email">账号 / 邮箱地址</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input 
                         id="reg-email" 
-                        type="email" 
-                        placeholder="name@example.com" 
+                        type="text" 
+                        placeholder="请输入您要创建的账号(如: admin) 或邮箱" 
                         className="pl-10 h-11"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        required 
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-password">设置密码</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        id="reg-password" 
-                        type="password" 
-                        placeholder="至少6位字符" 
-                        className="pl-10 h-11"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
                         required 
                       />
                     </div>
